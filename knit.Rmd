@@ -1,0 +1,264 @@
+---
+title: "hrt"
+output:
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+```{r }
+CHD_data=read.csv('Coronary_heart_risk_study.csv',header = TRUE)
+CHD_data$male<- as.factor(CHD_data$male)
+CHD_data$education<- as.factor(CHD_data$education)
+CHD_data$currentSmoker<- as.factor(CHD_data$currentSmoker)
+CHD_data$BPMeds <- as.factor(CHD_data$BPMeds)
+CHD_data$prevalentStroke <- as.factor(CHD_data$prevalentStroke)
+CHD_data$prevalentHyp <- as.factor(CHD_data$prevalentHyp)
+CHD_data$diabetes <- as.factor(CHD_data$diabetes)
+CHD_data$TenYearCHD <- as.factor(CHD_data$TenYearCHD)
+str(CHD_data)
+
+summary(CHD_data)
+```
+
+#treating missing values
+
+```{r }
+
+library(mice)
+
+library(VIM)
+
+# Missing data
+p <- function(x) {sum(is.na(x))/length(x)*100}
+apply(CHD_data, 2, p)###shows percentage of missing values for each variables
+md.pattern(CHD_data)
+
+
+# Impute
+impute <- mice(CHD_data[,1:16], m=3, seed = 123)# 3 times imputation
+print(impute)
+impute$imp$education# to check imputed values for education
+```
+
+
+# Complete data
+```{r }
+CHD_data1 <- complete(impute, 1)## for retrieving 1st imputation value
+View(CHD_data1)
+
+sum(is.na(CHD_data1))
+
+summary(CHD_data1)
+```
+
+#creating new variables
+```{r }
+CHD_data1$underweight<-ifelse(CHD_data1$BMI<18.5, 1,0)
+CHD_data1$Healthy<-ifelse(CHD_data1$BMI>18.6 & CHD_data1$BMI <= 24.5, 1,0)
+CHD_data1$Overweight<-ifelse(CHD_data1$BMI>24.6 & CHD_data1$BMI <= 29.9, 1,0)
+CHD_data1$Obese<-ifelse(CHD_data1$BMI>30,1,0)
+CHD_data1$ed1<-ifelse(CHD_data1$education==1,1,0)
+CHD_data1$ed2<-ifelse(CHD_data1$education==2,1,0)
+CHD_data1$ed3<-ifelse(CHD_data1$education==3,1,0)
+CHD_data1$ed4<-ifelse(CHD_data1$education==4,1,0)
+```
+
+##splitting the data
+```{r }
+
+library(caTools)
+library(caret)
+library(DMwR)
+prop.table(table(CHD_data1$TenYearCHD))
+balanced.gd <- SMOTE(TenYearCHD~.,data=CHD_data1)
+prop.table(table(balanced.gd$TenYearCHD))
+set.seed(1234)
+spl=sample.split(balanced.gd,SplitRatio = 0.7)
+
+train=subset(balanced.gd,spl==T)
+test=subset(balanced.gd,spl==F)
+prop.table(table(train$TenYearCHD))
+prop.table(table(test$TenYearCHD))
+```
+
+#logistic regression  
+```{r }
+logi=glm(TenYearCHD~.,data=train,family=binomial(link="logit"))
+summary(logi)
+step(logi,direction = "both")
+logi=glm(formula = TenYearCHD ~ male + age + cigsPerDay + BPMeds + 
+           prevalentStroke + prevalentHyp + diabetes + totChol + sysBP + 
+           diaBP + glucose + Overweight + ed1, family = binomial(link = "logit"), 
+         data = train)
+summary(logi)
+test$Pred=predict(logi,test,type="response")
+test$Prob=ifelse(test$Pred>0.5,1,0)
+test$Prob=as.factor(test$Prob)
+confusionMatrix(test$TenYearCHD,test$Prob,positive = "1")
+varImp(logi)
+plot(varImp(logi))
+library(ROCR)
+predl=prediction(test$Pred,test$TenYearCHD)
+auc=as.numeric(performance(predl,"auc")@y.values)
+auc
+gini=2*auc-1
+gini
+pref=performance(predl,"tpr","fpr")
+plot(pref)
+plot(pref,colorize=T,print.cutoffs.at=seq(0,1,0.06),text.adj=c(-0.2,1.7),main="ROC for Threshold")
+
+###############################################
+logi= train(TenYearCHD ~ male + age + cigsPerDay + BPMeds + 
+              prevalentStroke + prevalentHyp + diabetes + totChol + sysBP + 
+              diaBP + glucose + Overweight + ed1,data=train,
+          trControl = trainControl(method ="cv",number =10),method ="glm",family=binomial(link ="logit"))
+
+test$Pred=predict(logi,test,type="prob")[,"1"]
+test$Prob=ifelse(test$Pred>0.3,1,0)
+test$Prob=as.factor(test$Prob)
+confusionMatrix(test$TenYearCHD,test$Prob,positive = "1")
+
+library(ROCR)
+predl=prediction(test$Pred,test$TenYearCHD)
+auc=as.numeric(performance(predl,"auc")@y.values)
+auc
+gini=2*auc-1
+gini
+pref=performance(predl,"tpr","fpr")
+plot(pref)
+plot(pref,colorize=T,print.cutoffs.at=seq(0,1,0.06),text.adj=c(-0.2,1.7),main="ROC for Threshold")
+```
+
+#bagging
+```{r }
+
+##############################################################
+library(ipred)
+library(rpart)
+bag=bagging(TenYearCHD~male + age + cigsPerDay + BPMeds + 
+              prevalentStroke + prevalentHyp + diabetes + totChol + sysBP + 
+              diaBP + glucose + Overweight + ed1,data=train,control=rpart.control(maxdepth=5, minsplit=4))
+test$pred=predict(bag,newdata=test,type="prob")[,"1"]
+test$Prob=ifelse(test$Pred>0.5,1,0)
+test$Prob=as.factor(test$Prob)
+confusionMatrix(test$TenYearCHD,test$Prob,positive = "1")
+
+library(ROCR)
+predl=prediction(test$Pred,test$TenYearCHD)
+auc=as.numeric(performance(predl,"auc")@y.values)
+auc
+gini=2*auc-1
+gini
+pref=performance(predl,"tpr","fpr")
+plot(pref)
+plot(pref,colorize=T,print.cutoffs.at=seq(0,1,0.06),text.adj=c(-0.2,1.7),main="ROC for Threshold")
+
+
+###################################################################
+bag=train(TenYearCHD~male + age + cigsPerDay + 
+            BPMeds + prevalentStroke + prevalentHyp + diabetes + 
+            sysBP + glucose + Overweight,data=train,method="treebag",trcontrol=trainControl(method="cv",number=10),family=binomial)
+
+test$probg=predict(bag,newdata=test,type="prob")[,"1"]
+test$predb=ifelse(test$probg>0.3,1,0)
+test$predb=as.factor(test$predb)
+confusionMatrix(test$TenYearCHD,data=test$predb,positive="1")
+varImp(bag)
+plot(varImp(bag))
+
+library(ROCR)
+predl=prediction(test$probg,test$TenYearCHD)
+auc=as.numeric(performance(predl,"auc")@y.values)
+auc
+gini=2*auc-1
+gini
+pref=performance(predl,"tpr","fpr")
+plot(pref)
+plot(pref,colorize=T,print.cutoffs.at=seq(0,1,0.06),text.adj=c(-0.2,1.7),main="ROC for Threshold")
+
+```
+
+#xgboost
+```{r }
+#################################################################################
+tr=train(TenYearCHD~male + age + cigsPerDay + BPMeds + 
+           prevalentStroke + prevalentHyp + diabetes + totChol + sysBP + 
+           diaBP + glucose + Overweight + ed1,data=train,method="xgbTree",trControl=trainControl(method="cv",number=10))
+
+test$probo=predict(tr,newdata=test,type="prob")[,"1"]
+test$predbo=ifelse(test$probo>0.5,1,0)
+test$predbo=as.factor(test$predbo)
+confusionMatrix(test$TenYearCHD,test$predbo,positive="1")
+varImp(tr)
+plot(varImp(tr))
+
+library(ROCR)
+predbo=prediction(test$probo,test$TenYearCHD)
+auc=as.numeric(performance(predbo,"auc")@y.values)
+auc
+gini=2*auc-1
+gini
+pref=performance(predbo,"tpr","fpr")
+plot(pref)
+
+#####choose the right threshold
+plot(pref,colorize=T,print.cutoffs.at=seq(0,1,0.06),text.adj=c(-0.2,1.7),main="ROC for Threshold")
+#####################################################################################
+```
+
+#Random Forest
+```{r }
+
+rf=train(TenYearCHD~male + age + cigsPerDay + BPMeds + 
+           prevalentStroke + prevalentHyp + diabetes + totChol + sysBP + 
+           diaBP + glucose + Overweight + ed1,
+         data =train,method="rf",trcontrol=trainControl(method = "cv",number = 10),family=binomial)
+test$probrf=predict(rf,newdata=test,type="prob")[,"1"]
+test$predrf=ifelse(test$probrf>0.3,1,0)
+test$predrf=as.factor(test$predrf)
+
+confusionMatrix(test$TenYearCHD,data=test$predrf,positive="1")
+varImp(rf)
+plot(varImp(rf))
+library(ROCR)
+predrf=prediction(test$probrf,test$TenYearCHD)
+auc=as.numeric(performance(predrf,"auc")@y.values)
+auc
+gini=2*auc-1
+gini
+pref=performance(predrf,"tpr","fpr")
+plot(pref)
+
+#####choose the right threshold
+plot(pref,colorize=T,print.cutoffs.at=seq(0,1,0.06),text.adj=c(-0.2,1.7),main="ROC for Threshold")
+```
+
+install.packages('knitr')
+install.packages('markdown')
+install.packages('rmarkdown')
+tinytex::install_tinytex()
+library(knitr)
+library(markdown)
+library(rmarkdown)
+render("hrt.rmd","pdf_document")
