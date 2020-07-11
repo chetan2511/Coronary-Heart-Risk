@@ -1,0 +1,2 @@
+# Coronary-Heart-Risk
+The project revolves around Heart risk - one of the major causes of deaths in the world. Different factors were studied and analysed in depth to find as to what leads to an increase in mortality among heart patients.  Different Machine Learning models were used to interpret and find insights from the data. It was found that XGboost when applied using SMOTE gave best results in terms of sensitivity, specificity and accuracy.
